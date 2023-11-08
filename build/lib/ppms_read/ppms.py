@@ -6,12 +6,13 @@ import os
 
 class PPMS(object):
     def __init__(self, path):
-        self.path = path
+        self.df = pd.read_csv(path, sep=',',header =31)
         self.data = {}
         self.type = "RT"
+        self.fig = []
 
     def extract_RT(self, bridge, T=(2,4), iloc=(0,-1)):
-        df=pd.read_csv(self.path, sep=',',header =31)
+        df= self.df
         if iloc[1]<0:
             df=df.iloc[iloc[0]:]
         else:
@@ -30,7 +31,7 @@ class PPMS(object):
         return 0
 
     def extract_Ic(self, bridge, iloc=(0,-1)):
-        df=pd.read_csv(self.path, sep=',',header =31)
+        df=self.df
         if iloc[1]<0:
             df=df.iloc[iloc[0]:]
         else:
@@ -55,7 +56,7 @@ class PPMS(object):
         return 0
 
     def extract_Hc(self, bridge, I,  iloc=(0,-1)):
-        df=pd.read_csv(self.path, sep=',',header =31)
+        df=self.df
         if iloc[1]<0:
             df=df.iloc[iloc[0]:]
         else:
@@ -86,6 +87,37 @@ class PPMS(object):
 
         return 0
 
+    def extract_direction(self, bridge, iloc=(0,-1)):
+        df = self.df
+
+        if iloc[1]<0:
+            df=df.iloc[iloc[0]:]
+        else:
+            df=df.iloc[iloc[0]:iloc[1]]
+
+        oe = 'Magnetic Field (Oe)'
+        uA = 'Bridge {} Excitation (uA)'.format(bridge)
+        ohm = 'Bridge {} Resistance (Ohms)'.format(bridge)
+        th = 'Sample Position (deg)'
+        df = df[df[th].notnull()]
+        #print(np.sort(list(set(df[th]))))
+        df[th] = list(map(lambda l:
+                     (int(Decimal(str(l)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))-90)%360
+                     , df[th]))
+        df = df.sort_values(th)
+        th_set = {l for l in set(df[th]) if (l+180 in set(df[th])) or (l-180 in set(df[th]))}
+        df = df[df[th].isin(th_set)].sort_values(th)
+        threshold = 180
+        uA_plus = np.array(mk_data(df[df[th]<threshold], x=uA, cond=th, basis=ohm, ascending=True))
+        uA_minus = np.array(mk_data(df[df[th]>=threshold], x=uA, cond=th, basis=ohm, ascending=True))
+        odd = np.concatenate([(uA_plus-uA_minus)/2, -(uA_minus-uA_plus)/2])
+        even = np.concatenate([(uA_plus+uA_minus)/2, (uA_minus+uA_plus)/2])
+        theta = np.deg2rad(np.sort(list(set(df[th]))))
+
+        self.type = "direction"
+        self.data = pd.DataFrame({'odd': odd, 'even': even,'theta': theta})
+        return 0
+
 
 
 
@@ -98,50 +130,111 @@ class PPMS(object):
                  'ytick.labelsize':'xx-large'}
         pylab.rcParams.update(params)
         axisfontsize=18
-        df = self.data
+        self.fig = []
         if self.type=="Ic":
-            mk_fig_Ic(df)
+            self.__mk_fig_Ic()
         elif self.type=="Hc":
-            mk_fig_Hc(df)
+            self.__mk_fig_Hc()
         elif self.type=="RT":
-            mk_fig_RT(df)
+            self.__mk_fig_RT()
+        elif self.type=="direction":
+            self.__mk_fig_direction()
 
-def mk_fig_Ic(df):
-    axisfontsize=18
-    df["uA_delta"] = df["uA_plus"] + df["uA_minus"]
-    df["eta"] = 100*df["uA_delta"]/(df["uA_plus"]-df["uA_minus"])
-    plt.scatter(df["Oe"], df["uA_delta"])
-    plt.xlabel(r"$H\mathrm{[Oe]}$", fontsize=axisfontsize)
+    def update_fig(self, i=0):
+        fig = self.fig[i]
+        managed_fig = plt.figure()
+        canvas_manager = managed_fig.canvas.manager
+        canvas_manager.canvas.figure = fig
+        fig.set_canvas(canvas_manager.canvas)
+        plt.savefig("Image/update.png", bbox_inches='tight')
+        plt.show()
 
-    plt.show()
-    plt.clf()
-    plt.scatter(df["Oe"], df["eta"])
-    plt.xlabel(r"$H\mathrm{[Oe]}$", fontsize=axisfontsize)
-    plt.ylabel(r'$\eta$[%]', fontsize=axisfontsize)
-    plt.show()
-    plt.clf()
-    plt.scatter(df["Oe"], df["uA_plus"], label=r'$I_{\plus}$', color='red')
-    plt.scatter(df["Oe"], -df["uA_minus"], label=r'$I_{\minus}$', color='blue')
-    plt.xlabel(r"$H\mathrm{[Oe]}$", fontsize=axisfontsize)
-    plt.ylabel(r'$I_c\mathrm{[\mu A]}$', fontsize=axisfontsize)
-    plt.legend()
-    plt.show()
+    def __mk_fig_Ic(self):
+        axisfontsize=18
+        df = self.data
+        fig = plt.figure()
+        self.fig.append(fig)
+        ax = fig.add_subplot()
+        df["uA_delta"] = df["uA_plus"] + df["uA_minus"]
+        df["eta"] = 100*df["uA_delta"]/(df["uA_plus"]-df["uA_minus"])
+        ax.scatter(df["Oe"], df["uA_delta"])
+        ax.set_xlabel(r"$H\mathrm{[Oe]}$", fontsize=axisfontsize)
+        #plt.ylim([0,30])
 
-def mk_fig_Hc(df):
-    axisfontsize=18
-    plt.scatter(df["T"], df["H"])
-    plt.xlabel(r"$Temperature\mathrm{[K]}$", fontsize=axisfontsize)
-    plt.ylabel(r"$H_c\mathrm{[Oe]}$", fontsize=axisfontsize)
 
-    plt.show()
+        plt.show()
+        plt.clf()
+        fig = plt.figure()
+        self.fig.append(fig)
+        ax = fig.add_subplot()
+        ax.scatter(df["Oe"], df["eta"])
+        ax.set_xlabel(r"$H\mathrm{[Oe]}$", fontsize=axisfontsize)
+        ax.set_ylabel(r'$\eta$[%]', fontsize=axisfontsize)
+        #plt.ylim([0,3.7])
+        plt.savefig("Image/eta.png", bbox_inches='tight')
+        plt.show()
+        plt.clf()
+        fig = plt.figure()
+        self.fig.append(fig)
+        ax = fig.add_subplot()
+        ax.scatter(df["Oe"], df["uA_plus"], label=r'$I_{\plus}$', color='red')
+        ax.scatter(df["Oe"], -df["uA_minus"], label=r'$I_{\minus}$', color='blue')
+        ax.set_xlabel(r"$H\mathrm{[Oe]}$", fontsize=axisfontsize)
+        ax.set_ylabel(r'$I_c\mathrm{[\mu A]}$', fontsize=axisfontsize)
+        ax.legend()
+        #plt.ylim([0,420])
+        plt.savefig("Image/Ic.png", bbox_inches='tight')
+        plt.show()
 
-def mk_fig_RT(df):
-    axisfontsize=18
-    plt.scatter(df["T"], df["R"])
-    plt.xlabel(r"$Temperature\mathrm{[K]}$", fontsize=axisfontsize)
-    plt.ylabel(r'$Resistance\mathrm{[\Omega]}$', fontsize=axisfontsize)
+    def __mk_fig_Hc(self):
+        axisfontsize=18
+        df = self.data
+        fig = plt.figure()
+        self.fig.append(fig)
+        ax = fig.add_subplot()
+        ax.scatter(df["T"], df["H"])
+        ax.set_xlabel(r"$Temperature\mathrm{[K]}$", fontsize=axisfontsize)
+        ax.set_ylabel(r"$H_c\mathrm{[Oe]}$", fontsize=axisfontsize)
 
-    plt.show()
+        plt.show()
+
+    def __mk_fig_RT(self):
+        axisfontsize=18
+        df = self.data
+        fig = plt.figure()
+        self.fig.append(fig)
+        ax = fig.add_subplot()
+        ax.scatter(df["T"], df["R"])
+        ax.plot(df["T"], df["R"])
+        ax.set_xlabel(r"$Temperature\mathrm{[K]}$", fontsize=axisfontsize)
+        ax.set_ylabel(r'$Resistance\mathrm{[\Omega]}$', fontsize=axisfontsize)
+        plt.savefig("Image/RT.png", bbox_inches='tight')
+
+        plt.show()
+
+    def __mk_fig_direction(self):
+        axisfontsize=18
+        df = self.data
+
+        fig = plt.figure()
+        self.fig.append(fig)
+        theta = df['theta']
+        even = df['even']
+        ax = fig.add_subplot(projection='polar')
+        ax.scatter(theta, even)
+        ax.plot(theta, even)
+        plt.savefig("Image/direction_even.png", bbox_inches='tight')
+        plt.show()
+        plt.clf()
+
+        fig = plt.figure()
+        self.fig.append(fig)
+        odd = df['odd']
+        ax = fig.add_subplot(projection='polar')
+        ax.scatter(theta, odd)
+        ax.plot(theta, odd)
+        plt.savefig("Image/direction_odd.png", bbox_inches='tight')
+        plt.show()
 
 def mk_data(df, x,cond, basis, ascending):
     T = list((set(df[cond])))
